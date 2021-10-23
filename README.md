@@ -19,3 +19,16 @@ the [Twitter Development Portal](https://developer.twitter.com/en/portal/dashboa
 
 To simplify the process of stopping the application, you can start it via your IDE (I use IntelliJ). To stop it, you
 have to press the stop button twice.
+
+## What App Does
+
+[TwitterListener](src/main/java/com/felixseifert/bugs/TwitterListener.java) can be considered as the main class. It
+performs a few steps:
+
+1. Get the existing rules which are stored at Twitter's side. The rules specify which Tweets to pull from Twitter.
+2. Delete the existing rules from Twitter's side.
+3. Create the in the source code defined rules at Twitter's side.
+4. Connect to the [Filtered Stream](https://developer.twitter.com/en/docs/twitter-api/tweets/filtered-stream) to read
+   the text of the Tweets which match the rules and log them.
+
+If I remove the fourth step, i.e. do not let the app connect to the stream and consume it, everything works.
