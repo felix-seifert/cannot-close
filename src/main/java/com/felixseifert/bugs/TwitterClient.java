@@ -1,19 +1,5 @@
 package com.felixseifert.bugs;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.URISyntaxException;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
-import javax.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -23,12 +9,23 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import org.json.JSONArray;
 import org.json.JSONObject;
+
+import javax.enterprise.context.ApplicationScoped;
+import java.io.*;
+import java.net.URISyntaxException;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 @ApplicationScoped
 public class TwitterClient {
@@ -45,25 +42,21 @@ public class TwitterClient {
     String twitterBearerToken;
 
     public Stream<String> connectStream(final int bufferSize) throws URISyntaxException, IOException {
-        final HttpClient httpClient = getHttpClientWithStandardCookieSpecs();
+        final CloseableHttpClient httpClient = getHttpClientWithStandardCookieSpecs();
         final HttpGet httpGet = createHttpGetWithHeader(twitterUrlStream);
         final HttpResponse response = httpClient.execute(httpGet);
         final Optional<HttpEntity> entityOptional = Optional.ofNullable(response.getEntity());
-        return getTweetStreamFromEntity(entityOptional, bufferSize);
-    }
-
-    private Stream<String> getTweetStreamFromEntity(
-            final Optional<HttpEntity> entityOptional, final int bufferSize) {
-        return entityOptional.stream()
-                .map(this::getStream)
-                .filter(Objects::nonNull)
-                .map(InputStreamReader::new)
-                .map(inputStreamReader -> new BufferedReader(inputStreamReader, bufferSize))
-                .flatMap(BufferedReader::lines)
-                .filter(line -> !line.isBlank())
-                .map(JSONObject::new)
-                .map(line -> line.getJSONObject("data"))
-                .map(data -> data.getString("text"));
+        final Optional<InputStreamReader> inputStreamReaderOptional =
+                entityOptional
+                        .map(this::getStream)
+                        .map(InputStreamReader::new);
+        final Optional<BufferedReader> bufferedReaderOptional =
+                inputStreamReaderOptional
+                        .map(inputStreamReader -> new BufferedReader(inputStreamReader, bufferSize));
+        return getTweetStream(bufferedReaderOptional)
+                .onClose(() -> close(httpClient))
+                .onClose(() -> inputStreamReaderOptional.ifPresent(this::close))
+                .onClose(() -> bufferedReaderOptional.ifPresent(this::close));
     }
 
     private InputStream getStream(final HttpEntity httpEntity) {
@@ -73,6 +66,23 @@ public class TwitterClient {
             e.printStackTrace();
         }
         return null;
+    }
+
+    private Stream<String> getTweetStream(final Optional<BufferedReader> bufferedReaderOptional) {
+        return bufferedReaderOptional.stream()
+                .flatMap(BufferedReader::lines)
+                .filter(line -> !line.isBlank())
+                .map(JSONObject::new)
+                .map(line -> line.getJSONObject("data"))
+                .map(data -> data.getString("text"));
+    }
+
+    private void close(final Closeable closeable) {
+        try {
+            closeable.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public List<String> getExistingRules() throws URISyntaxException, IOException {
@@ -169,7 +179,7 @@ public class TwitterClient {
         return String.format("{\"add\": [%s]}", result.substring(0, result.length() - 1));
     }
 
-    private HttpClient getHttpClientWithStandardCookieSpecs() {
+    private CloseableHttpClient getHttpClientWithStandardCookieSpecs() {
         return HttpClients.custom()
                 .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.STANDARD).build())
                 .build();

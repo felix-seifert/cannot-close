@@ -1,16 +1,18 @@
 package com.felixseifert.bugs;
 
-import io.quarkus.runtime.Startup;
+import io.quarkus.runtime.ShutdownEvent;
+import io.quarkus.runtime.StartupEvent;
+import org.jboss.logging.Logger;
+
+import javax.enterprise.context.ApplicationScoped;
+import javax.enterprise.event.Observes;
+import javax.inject.Inject;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.PostConstruct;
-import javax.enterprise.context.ApplicationScoped;
-import javax.inject.Inject;
-import org.jboss.logging.Logger;
+import java.util.stream.Stream;
 
-@Startup
 @ApplicationScoped
 public class TwitterListener {
 
@@ -19,8 +21,9 @@ public class TwitterListener {
     @Inject
     TwitterClient twitterClient;
 
-    @PostConstruct
-    public void startListener() throws IOException, URISyntaxException {
+    private Stream<String> tweetStream;
+
+    public void startListener(@Observes StartupEvent startupEvent) throws IOException, URISyntaxException {
         final Map<String, String> rules =
                 Map.of("(entity:\\\"New York\\\" OR #NewYork OR \\\"New York\\\") lang:en -is:retweet", "NYC");
 
@@ -28,6 +31,12 @@ public class TwitterListener {
         if (!existingRules.isEmpty()) twitterClient.deleteRules(existingRules);
         twitterClient.createRules(rules);
 
-        twitterClient.connectStream(1024).forEach(LOGGER::info);
+        tweetStream = twitterClient.connectStream(1024);
+        tweetStream.forEach(LOGGER::info);
+    }
+
+    public void stopListener(@Observes ShutdownEvent shutdownEvent) {
+        LOGGER.info("STOPPED");
+        tweetStream.close();
     }
 }
